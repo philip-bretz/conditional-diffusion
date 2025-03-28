@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "conditional-diffusion"
+version = "0.1.0"
+description = "Testbed for conditional diffusion sampling"
+authors = ["Philip Bretz"]
+package-mode = true
+
+[tool.poetry.dependencies]
+python = "^3.12"
+numpy = "^2.2.3"
+torch = "^2.6.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "25.1.0"
+ruff = "0.9.6"
+isort = "6.0.0"
+mypy = "1.15.0"
+pytest = "8.3.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
