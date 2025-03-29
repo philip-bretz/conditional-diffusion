@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 from typing import Callable
 
 import numpy as np
@@ -103,6 +104,26 @@ class Diffusion:
         self._model = MLP()
         self._optimizer = torch.optim.Adam(self._model.parameters(), lr=0.001)
         self._loss = nn.MSELoss()
+
+    @classmethod
+    def load(cls, model_filename: str, settings_filename: str):
+        # Load settings
+        with open(settings_filename, "r") as file:
+            settings_data = json.load(file)
+        settings = DiffusionSettings(**settings_data)
+        # Instantiate class
+        diffusion = cls(settings)
+        # Load model weights
+        diffusion._model.load_state_dict(torch.load(model_filename, weights_only=True))
+        return diffusion
+
+    def save(self, model_filename: str, settings_filename: str):
+        # Save model
+        torch.save(self._model.state_dict(), model_filename)
+        # Save settings
+        settings_data = asdict(self._settings)
+        with open(settings_filename, "w") as file:
+            json.dump(settings_data, file, indent=4)
 
     def _preconditioning(self, sigma: Tensor) -> Preconditioning:
         return Preconditioning.of_sigma(sigma, self._settings.sigma_data)
