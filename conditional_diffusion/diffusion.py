@@ -7,7 +7,7 @@ import torch
 from torch import Tensor, nn
 
 from conditional_diffusion.logger import StepLogger
-from conditional_diffusion.models import MLP
+from conditional_diffusion.denoiser import Denoiser
 
 
 @dataclass(frozen=True)
@@ -58,27 +58,17 @@ class Preconditioning:
         return (1 / self.c_out) * (sample - self.c_skip * noised_sample)
 
     def pred_target(
-        self, noised_sample: Tensor, model: Callable[[Tensor, Tensor], Tensor]
+        self, noised_sample: Tensor, denoiser: Denoiser
     ) -> Tensor:
-        return model(self.c_in * noised_sample, self.c_noise)
+        return denoiser.forward(self.c_in * noised_sample, self.c_noise)
 
     def pred(self, noised_sample: Tensor, pred_target: Tensor) -> Tensor:
         return self.c_skip * noised_sample + self.c_out * pred_target
 
-    def target_error(
-        self,
-        sample: Tensor,
-        noised_sample: Tensor,
-        model: Callable[[Tensor, Tensor], Tensor],
-    ) -> Tensor:
-        return self.pred_target(noised_sample, model) - self.target(
-            sample, noised_sample
-        )
-
     def pred_from_noised_sample(
-        self, noised_sample: Tensor, model: Callable[[Tensor, Tensor], Tensor]
+        self, noised_sample: Tensor, denoiser: Denoiser
     ) -> Tensor:
-        pred_target = self.pred_target(noised_sample, model)
+        pred_target = self.pred_target(noised_sample, denoiser)
         return self.pred(noised_sample, pred_target)
 
 
@@ -101,8 +91,8 @@ def _to_torch(array: np.ndarray) -> Tensor:
 class Diffusion:
     def __init__(self, diffusion_settings: DiffusionSettings):
         self._settings = diffusion_settings
-        self._model = MLP()
-        self._optimizer = torch.optim.Adam(self._model.parameters(), lr=0.001)
+        self._denoiser = Denoiser()
+        self._optimizer = torch.optim.Adam(self._denoiser.model.parameters(), lr=0.001)
         self._loss = nn.MSELoss()
 
     @classmethod
@@ -114,12 +104,12 @@ class Diffusion:
         # Instantiate class
         diffusion = cls(settings)
         # Load model weights
-        diffusion._model.load_state_dict(torch.load(model_filename, weights_only=True))
+        diffusion._denoiser.model.load_state_dict(torch.load(model_filename, weights_only=True))
         return diffusion
 
     def save(self, model_filename: str, settings_filename: str):
         # Save model
-        torch.save(self._model.state_dict(), model_filename)
+        torch.save(self._denoiser.model.state_dict(), model_filename)
         # Save settings
         settings_data = asdict(self._settings)
         with open(settings_filename, "w") as file:
@@ -134,7 +124,7 @@ class Diffusion:
             noised_sample_tensor = _to_torch(noised_sample)
             preconditioning = self._preconditioning(sigma_tensor)
             pred = preconditioning.pred_from_noised_sample(
-                noised_sample_tensor, self._model
+                noised_sample_tensor, self._denoiser
             )
             pred_arr = pred.numpy().flatten()
         return pred_arr
@@ -152,7 +142,7 @@ class Diffusion:
         # Precondition from sigma
         preconditioning = self._preconditioning(sigma_tensor)
         target = preconditioning.target(sample_tensor, noised_sample_tensor)
-        pred_target = preconditioning.pred_target(noised_sample_tensor, self._model)
+        pred_target = preconditioning.pred_target(noised_sample_tensor, self._denoiser)
         pred = preconditioning.pred(noised_sample_tensor, pred_target)
 
         return BatchOutput(target=target, pred_target=pred_target, pred=pred)
@@ -165,9 +155,9 @@ class Diffusion:
     ) -> DiffusionStatistics:
         loss = np.zeros(len(batches))
         if train:
-            self._model.train()
+            self._denoiser.model.train()
         else:
-            self._model.eval()
+            self._denoiser.model.eval()
         for i, batch in enumerate(batches):
             if train:
                 batch_output = self._single_batch(batch)
