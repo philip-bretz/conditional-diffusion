@@ -1,11 +1,12 @@
 import json
 from dataclasses import asdict, dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 import numpy as np
 import torch
 from torch import Tensor, nn
 
+from conditional_diffusion.logger import StepLogger
 from conditional_diffusion.models import MLP
 
 
@@ -91,7 +92,6 @@ class BatchOutput:
 @dataclass(frozen=True)
 class DiffusionStatistics:
     loss: np.ndarray
-    rmse: np.ndarray
 
 
 def _to_torch(array: np.ndarray) -> Tensor:
@@ -157,11 +157,13 @@ class Diffusion:
 
         return BatchOutput(target=target, pred_target=pred_target, pred=pred)
 
-    def _train_or_test_loop(
-        self, batches: list[np.ndarray], train: bool
+    def train_or_test_loop(
+        self,
+        batches: list[np.ndarray],
+        train: bool,
+        logger: Optional[StepLogger] = None,
     ) -> DiffusionStatistics:
         loss = np.zeros(len(batches))
-        rmse = np.zeros(len(batches))
         if train:
             self._model.train()
         else:
@@ -182,14 +184,7 @@ class Diffusion:
 
             # Record loss and RMSE
             loss[i] = loss_current.item()
-            rmse[i] = np.sqrt(
-                np.mean((batch_output.pred.numpy().flatten() - batch) ** 2)
-            )
+            if logger is not None:
+                logger.update(i, f"Loss: {loss[i]}")
 
-        return DiffusionStatistics(loss=loss, rmse=rmse)
-
-    def train(self, batches: list[np.ndarray]) -> DiffusionStatistics:
-        return self._train_or_test_loop(batches, train=True)
-
-    def test(self, batches: list[np.ndarray]) -> DiffusionStatistics:
-        return self._train_or_test_loop(batches, train=False)
+        return DiffusionStatistics(loss=loss)
