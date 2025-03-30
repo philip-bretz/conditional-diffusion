@@ -1,9 +1,11 @@
 import torch
-from torch import nn, Tensor
+from torch import Tensor, nn
 
 
 class MLP(nn.Module):
-    def __init__(self, in_size: int, out_size: int, n_internal: int = 256, n_output: int = 128):
+    def __init__(
+        self, in_size: int, out_size: int, n_internal: int = 256, n_output: int = 128
+    ):
         super().__init__()
         self.hidden = nn.Linear(in_size, n_internal)
         self.hidden2 = nn.Linear(n_internal, n_internal)

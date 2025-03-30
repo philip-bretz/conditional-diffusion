@@ -1,13 +1,13 @@
 import json
 from dataclasses import asdict, dataclass
-from typing import Callable, Optional
+from typing import Optional
 
 import numpy as np
 import torch
 from torch import Tensor, nn
 
-from conditional_diffusion.logger import StepLogger
 from conditional_diffusion.denoiser import Denoiser
+from conditional_diffusion.logger import StepLogger
 
 
 @dataclass(frozen=True)
@@ -57,9 +57,7 @@ class Preconditioning:
     def target(self, sample: Tensor, noised_sample: Tensor) -> Tensor:
         return (1 / self.c_out) * (sample - self.c_skip * noised_sample)
 
-    def pred_target(
-        self, noised_sample: Tensor, denoiser: Denoiser
-    ) -> Tensor:
+    def pred_target(self, noised_sample: Tensor, denoiser: Denoiser) -> Tensor:
         return denoiser.forward(self.c_in * noised_sample, self.c_noise)
 
     def pred(self, noised_sample: Tensor, pred_target: Tensor) -> Tensor:
@@ -104,7 +102,9 @@ class Diffusion:
         # Instantiate class
         diffusion = cls(settings)
         # Load model weights
-        diffusion._denoiser.model.load_state_dict(torch.load(model_filename, weights_only=True))
+        diffusion._denoiser.model.load_state_dict(
+            torch.load(model_filename, weights_only=True)
+        )
         return diffusion
 
     def save(self, model_filename: str, settings_filename: str):
