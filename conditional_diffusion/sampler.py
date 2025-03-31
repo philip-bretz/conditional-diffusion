@@ -6,43 +6,69 @@ from conditional_diffusion.diffusion import Diffusion
 
 
 @dataclass(frozen=True)
-class SamplerSettings:
-    s_noise: float = 1.0
-    s_churn: float = 1.0
-    num_steps: int = 25
-
-    def gamma(self) -> np.ndarray:
-        return np.full(
-            self.num_steps, min(self.s_churn / self.num_steps, np.sqrt(2) - 1)
-        )
+class SamplerHyperparameters:
+    tau: float
+    grid_size: int = 25
+    num_corrections: int = 2
 
 
-class StochasticSampler:
-    def __init__(self, diffusion: Diffusion, sampler_settings: SamplerSettings):
+@dataclass(frozen=True)
+class Sample:
+    array: np.ndarray
+
+    def num_steps(self) -> int:
+        return self.array.shape[0]
+
+    def sample_size(self) -> int:
+        return self.array.shape[1]
+
+    def dim(self) -> int:
+        return self.array.shape[2]
+
+    def get_chain(self, index: int) -> np.ndarray:
+        return self.array[:,index,:]
+
+    def get_sample(self) -> np.ndarray:
+        return self.array[-1,:,:]
+
+    def get_sample_at_step(self, index: int) -> np.ndarray:
+        return self.array[index,:,:]
+
+
+class PredictorCorrectorSampler:
+    def __init__(self, diffusion: Diffusion, hyper_params: SamplerHyperparameters):
         self._diffusion = diffusion
-        self._settings = sampler_settings
-        self._t_grid = self._diffusion._settings.t_grid(sampler_settings.num_steps)
-        self._gamma = self._settings.gamma()
+        self._hyper_params = hyper_params
 
-    def generate_sample(self, size: int, return_full: bool = False) -> np.ndarray:
-        x = np.random.standard_normal(size) * self._t_grid[0]
-        if return_full:
-            X = np.zeros((len(self._t_grid), size))
-            X[0] = x[:]
-        for i in range(len(self._t_grid) - 1):
-            eps = np.random.standard_normal(size) * self._settings.s_noise
-            t = self._t_grid[i]
-            t_hat = t * (1 + self._gamma[i])
-            x_hat = x + np.sqrt(t_hat**2 - t**2) * eps
-            d = (x_hat - self._diffusion.pred(t_hat, x_hat)) / t_hat
-            t_new = self._t_grid[i + 1]
-            x_new = x_hat + (t_new - t_hat) * d
-            if t_new > 0:
-                d_dash = (x_new - self._diffusion.pred(t_new, x_new)) / t_new
-                x_new = x_hat + (t_new - t_hat) * (0.5 * d + 0.5 * d_dash)
-            x = x_new
-            if return_full:
-                X[i + 1] = x[:]
-        if return_full:
-            return X
-        return x
+    def t_grid(self) -> np.ndarray:
+        return np.flip(np.linspace(0, 1, self._hyper_params.grid_size))
+
+    def generate_sample(self, size: int) -> Sample:
+        t_grid = self.t_grid()
+        N = len(t_grid)
+        dim = self._diffusion.dim()
+        X = np.zeros((N, size, dim))
+        X[0] = np.random.standard_normal((size, dim))
+        for i in range(N - 1):
+            x = self._exponential_integrator_step(X[i], t_grid[i], t_grid[i+1])
+            for _ in range(self._hyper_params.num_corrections):
+                x = self._langevin_correction(x, t_grid[i])
+            X[i+1] = x
+        return Sample(array=X)
+
+    def _exponential_integrator_step(self, x: np.ndarray, t_1: float, t_2: float) -> np.ndarray:
+        """
+        Exponential integrator reversing the SDE
+
+        See Eq. (16) in https://arxiv.org/pdf/2306.10574
+        """
+        score = self._diffusion.score(x, t_1)
+        mu_1, sigma_1 = self._diffusion.var_schedule.mu_sigma_for_t(t_1)
+        mu_2, sigma_2 = self._diffusion.var_schedule.mu_sigma_for_t(t_2)
+        return mu_2 / mu_1 * x + (mu_2 / mu_1 - sigma_2 / sigma_1) * (sigma_1 ** 2) * score
+
+    def _langevin_correction(self, x: np.ndarray, t: float):
+        eps = np.random.standard_normal(x.shape)
+        score = self._diffusion.score(x, t)
+        delta = self._hyper_params.tau * self._diffusion.dim() / np.sum(score ** 2, axis=1)
+        return x + delta * score + np.sqrt(2 * delta) * eps
