@@ -9,6 +9,7 @@ package-mode = true
 python = "^3.12"
 numpy = "^2.2.3"
 torch = "^2.6.0"
+matplotlib = "3.10.1"
 
 [tool.poetry.group.dev.dependencies]
 black = "25.1.0"
@@ -16,6 +17,7 @@ ruff = "0.9.6"
 isort = "6.0.0"
 mypy = "1.15.0"
 pytest = "8.3.4"
+ipykernel = "6.29.5"
 
 [build-system]
 requires = ["poetry-core"]
